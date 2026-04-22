@@ -1,56 +1,131 @@
-import 'dart:async';
-
-import 'package:dio/dio.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_crashlytics/firebase_crashlytics.dart';
-import 'package:firebase_performance/firebase_performance.dart';
-import 'package:flutter/foundation.dart';
+import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:flutter_native_splash/flutter_native_splash.dart';
-import 'package:get_it/get_it.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
 
-import 'app.dart';
-import 'env.dart';
-import 'firebase_options.dart';
-import 'utils/http_client.dart';
+void main() {
+  runApp(const HorizonApp());
+}
 
-void main() async {
-  await runZonedGuarded(
-    () async {
-      final widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
-      // Retain native splash screen until Dart is ready
-      FlutterNativeSplash.preserve(widgetsBinding: widgetsBinding);
-      await Firebase.initializeApp(
-        options: DefaultFirebaseOptions.currentPlatform,
-      );
-      GetIt.instance.registerLazySingleton(
-        () => HttpClient(baseOptions: BaseOptions(baseUrl: Env.serverUrl)),
-      );
-      if (!kIsWeb) {
-        if (kDebugMode) {
-          await FirebaseCrashlytics.instance
-              .setCrashlyticsCollectionEnabled(false);
-        } else {
-          await FirebaseCrashlytics.instance
-              .setCrashlyticsCollectionEnabled(true);
-        }
-      }
-      if (kDebugMode) {
-        await FirebasePerformance.instance
-            .setPerformanceCollectionEnabled(false);
-      }
-      FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterError;
+class HorizonApp extends StatelessWidget {
+  const HorizonApp({super.key});
 
-      ErrorWidget.builder = (FlutterErrorDetails error) {
-        Zone.current.handleUncaughtError(error.exception, error.stack!);
-        return ErrorWidget(error.exception);
-      };
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      title: 'Horizon',
+      theme: ThemeData(
+        colorSchemeSeed: Colors.indigo,
+        useMaterial3: true,
+      ),
+      home: const HomePage(),
+    );
+  }
+}
 
-      runApp(const MyApp());
-      FlutterNativeSplash.remove(); // Now remove splash screen
-    },
-    (exception, stackTrace) {
-      FirebaseCrashlytics.instance.recordError(exception, stackTrace);
-    },
-  );
+class HomePage extends StatefulWidget {
+  const HomePage({super.key});
+
+  @override
+  State<HomePage> createState() => _HomePageState();
+}
+
+class _HomePageState extends State<HomePage> {
+  final picker = ImagePicker();
+  List<File> images = [];
+
+  @override
+  void initState() {
+    super.initState();
+    loadImages();
+  }
+
+  Future<Directory> get folder async {
+    final dir = await getApplicationDocumentsDirectory();
+    final f = Directory("${dir.path}/horizon");
+    if (!await f.exists()) {
+      await f.create(recursive: true);
+    }
+    return f;
+  }
+
+  Future<void> loadImages() async {
+    final f = await folder;
+    final files = f.listSync().whereType<File>().toList();
+
+    setState(() {
+      images = files;
+    });
+  }
+
+  Future<void> pickImage(ImageSource source) async {
+    final x = await picker.pickImage(source: source);
+    if (x == null) return;
+
+    final f = await folder;
+
+    await File(x.path).copy(
+      "${f.path}/${DateTime.now().millisecondsSinceEpoch}.jpg",
+    );
+
+    loadImages();
+  }
+
+  Future<void> deleteImage(File file) async {
+    await file.delete();
+    loadImages();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text("Horizon"),
+        centerTitle: true,
+      ),
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          FloatingActionButton(
+            heroTag: "1",
+            onPressed: () => pickImage(ImageSource.camera),
+            child: const Icon(Icons.camera_alt),
+          ),
+          const SizedBox(height: 10),
+          FloatingActionButton(
+            heroTag: "2",
+            onPressed: () => pickImage(ImageSource.gallery),
+            child: const Icon(Icons.photo),
+          ),
+        ],
+      ),
+      body: images.isEmpty
+          ? const Center(child: Text("No Images"))
+          : GridView.builder(
+              padding: const EdgeInsets.all(10),
+              itemCount: images.length,
+              gridDelegate:
+                  const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                crossAxisSpacing: 10,
+                mainAxisSpacing: 10,
+              ),
+              itemBuilder: (context, index) {
+                final file = images[index];
+
+                return GestureDetector(
+                  onLongPress: () => deleteImage(file),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(16),
+                    child: Image.file(
+                      file,
+                      fit: BoxFit.cover,
+                    ),
+                  ),
+                );
+              },
+            ),
+    );
+  }
 }
